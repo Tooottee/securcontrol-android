@@ -30,16 +30,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y p7zip-full
 
-      - name: Extraer proyecto RAR o ZIP
+      - name: Extraer proyecto
         run: |
           ARCHIVE=$(find . -maxdepth 1 -type f \( -iname '*.rar' -o -iname '*.zip' \) -print -quit)
           if [ -z "$ARCHIVE" ]; then
-            echo "No se encuentra el archivo RAR o ZIP"
+            echo "No se encuentra el archivo del proyecto"
             exit 1
           fi
-          mkdir -p extracted
+          mkdir extracted
           7z x "$ARCHIVE" -oextracted -y
-          SETTINGS=$(find extracted -type f -name settings.gradle -print -quit)
+          SETTINGS=$(find extracted -name settings.gradle -print -quit)
           if [ -z "$SETTINGS" ]; then
             echo "No se encuentra settings.gradle"
             exit 1
@@ -47,7 +47,20 @@ jobs:
           PROJECT_DIR="${SETTINGS%/settings.gradle}"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compilar APK
+      - name: Reparar configuración Gradle
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          root = Path(os.environ["PROJECT_DIR"])
+          for name in ["build.gradle", "app/build.gradle"]:
+              p = root / name
+              if p.exists():
+                  s = p.read_text()
+                  p.write_text(s.replace("\\n", "\n"))
+          PY
+
+      - name: Compilar aplicación
         run: |
           cd "$PROJECT_DIR"
           gradle assembleDebug
@@ -57,7 +70,7 @@ jobs:
           mkdir -p output
           cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" output/SECURCONTROL.apk
 
-      - name: Guardar APK
+      - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
           name: SECURCONTROL-APK
