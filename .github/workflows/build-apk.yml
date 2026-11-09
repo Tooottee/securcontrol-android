@@ -1,0 +1,41 @@
+name: Crear APK SECURCONTROL
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar proyecto
+        uses: actions/checkout@v4
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Extraer proyecto
+        run: |
+          ZIP=$(find . -maxdepth 1 -name '*.zip' | head -n 1)
+          unzip "$ZIP" -d extracted
+
+      - name: Compilar APK
+        run: |
+          cd extracted/SECURCONTROL_ANDROID
+          gradle assembleDebug
+
+      - name: Guardar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SECURCONTROL-APK
+          path: extracted/SECURCONTROL_ANDROID/app/build/outputs/apk/debug/app-debug.apk
