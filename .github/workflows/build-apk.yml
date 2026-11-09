@@ -1,3 +1,4 @@
+
 name: Crear APK SECURCONTROL
 
 on:
@@ -24,18 +25,40 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Extraer proyecto
+      - name: Instalar extractor
         run: |
-          ZIP=$(find . -maxdepth 1 -name '*.zip' | head -n 1)
-          unzip "$ZIP" -d extracted
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full
+
+      - name: Extraer proyecto RAR o ZIP
+        run: |
+          ARCHIVE=$(find . -maxdepth 1 -type f \( -iname '*.rar' -o -iname '*.zip' \) -print -quit)
+          if [ -z "$ARCHIVE" ]; then
+            echo "No se encuentra el archivo RAR o ZIP"
+            exit 1
+          fi
+          mkdir -p extracted
+          7z x "$ARCHIVE" -oextracted -y
+          SETTINGS=$(find extracted -type f -name settings.gradle -print -quit)
+          if [ -z "$SETTINGS" ]; then
+            echo "No se encuentra settings.gradle"
+            exit 1
+          fi
+          PROJECT_DIR="${SETTINGS%/settings.gradle}"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Compilar APK
         run: |
-          cd extracted/SECURCONTROL_ANDROID
+          cd "$PROJECT_DIR"
           gradle assembleDebug
+
+      - name: Preparar APK
+        run: |
+          mkdir -p output
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" output/SECURCONTROL.apk
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
           name: SECURCONTROL-APK
-          path: extracted/SECURCONTROL_ANDROID/app/build/outputs/apk/debug/app-debug.apk
+          path: output/SECURCONTROL.apk
