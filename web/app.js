@@ -47,7 +47,7 @@
   }
   function renderEmployeeRows(rows){
     if(!rows.length)return '<p class="muted">Todavía no hay trabajadores registrados.</p>';
-    return '<table class="data-table"><thead><tr><th>Nombre</th><th>Código</th><th>Jornada</th><th>IRPF</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>'+rows.map(e=>'<tr><td>'+esc(e.full_name)+'</td><td>'+esc(e.employee_code||"—")+'</td><td>'+esc(e.work_percentage??100)+'%</td><td>'+esc(e.irpf??0)+'%</td><td><span class="tag">'+(e.active?"Activo":"Inactivo")+'</span></td><td><button class="secondary small-action" data-toggle="'+esc(e.id)+'" data-active="'+String(!!e.active)+'">'+(e.active?"Desactivar":"Activar")+'</button> <button class="secondary small-action" data-employee-delete="'+esc(e.id)+'">Eliminar</button></td></tr>').join("")+'</tbody></table>';
+    return '<table class="data-table"><thead><tr><th>Nombre</th><th>Código</th><th>Jornada</th><th>IRPF</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>'+rows.map(e=>'<tr><td>'+esc(e.full_name)+'</td><td>'+esc(e.employee_code||"—")+'</td><td>'+esc(e.work_percentage??100)+'%</td><td>'+esc(e.irpf??0)+'%</td><td><span class="tag">'+(e.active?"Activo":"Inactivo")+'</span></td><td><button class="secondary small-action" data-toggle="'+esc(e.id)+'" data-active="'+String(!!e.active)+'">'+(e.active?"Desactivar":"Activar")+'</button> '+(!e.user_id?'<button class="secondary small-action" data-create-account="'+esc(e.id)+'">Crear acceso</button> ':"")+'<button class="secondary small-action" data-employee-delete="'+esc(e.id)+'">Eliminar</button></td></tr>').join("")+'</tbody></table>';
   }
   async function loadEmployees(){
     const {data,error}=await db.from("employees").select("*").order("full_name",{ascending:true});
@@ -59,6 +59,25 @@
       const {error}=await db.from("employees").update({active}).eq("id",b.dataset.toggle);
       if(error){notify("No se pudo actualizar el trabajador: "+error.message);return;}
       notify("Estado del trabajador actualizado.");await loadEmployees();
+    }));
+    $("module-table").querySelectorAll("[data-create-account]").forEach(b=>b.addEventListener("click",async()=>{
+      const employee=employeesCache.find(e=>String(e.id)===b.dataset.createAccount);
+      if(!employee||employee.user_id)return;
+      const email=prompt("Correo electrónico para el acceso:",employee.email||"");
+      if(email===null)return;
+      const cleanEmail=email.trim().toLowerCase();
+      if(!cleanEmail||!cleanEmail.includes("@")){notify("Introduce un correo electrónico válido.");return;}
+      const password=prompt("Contraseña provisional (mínimo 6 caracteres). El vigilante deberá cambiarla después:", "");
+      if(password===null)return;
+      if(password.length<6){notify("La contraseña debe tener al menos 6 caracteres.");return;}
+      b.disabled=true;b.textContent="Creando…";
+      const {data,error}=await db.functions.invoke("create-employee-account",{body:{employee_id:employee.id,full_name:employee.full_name,email:cleanEmail,temporary_password:password}});
+      if(error||!data?.success){
+        notify("No se pudo crear el acceso: "+(data?.error||error?.message||"Error desconocido"));
+        b.disabled=false;b.textContent="Crear acceso";return;
+      }
+      notify("Cuenta de acceso creada y vinculada correctamente.");
+      await loadEmployees();
     }));
     $("module-table").querySelectorAll("[data-employee-delete]").forEach(b=>b.addEventListener("click",async()=>{
       const employee=employeesCache.find(e=>String(e.id)===b.dataset.employeeDelete);
