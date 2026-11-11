@@ -17,12 +17,20 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   const url = Deno.env.get("SUPABASE_URL");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  // Supabase now injects named secret API keys as a JSON dictionary.
+  // Use the default secret key for privileged server-side operations.
+  let serviceKey = "";
+  try {
+    const secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+    serviceKey = String(secretKeys.default ?? "");
+  } catch (error) {
+    console.error("No se pudo leer SUPABASE_SECRET_KEYS:", error);
+  }
   const authHeader = req.headers.get("Authorization");
   const accessToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
 
   if (!url || !serviceKey) {
-    console.error("Configuración incompleta: faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY");
+    console.error("Configuración incompleta: falta SUPABASE_URL o la clave default de SUPABASE_SECRET_KEYS");
     return json({ error: "La función no tiene configuradas sus credenciales internas en Supabase." }, 500);
   }
   if (!accessToken) return json({ error: "No se recibió la sesión del administrador. Cierra sesión y vuelve a entrar." }, 401);
