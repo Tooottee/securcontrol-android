@@ -63,15 +63,26 @@
   }
   function employeeForm(){
     const box=document.createElement("div");box.className="form-panel";box.id="employee-form-panel";
-    box.innerHTML='<form id="employee-form" class="record-form"><h3>Nuevo trabajador</h3><div class="form-grid"><label>Nombre completo<input name="full_name" required maxlength="120"></label><label>Código de empleado<input name="employee_code" maxlength="40"></label><label>Fecha de alta<input name="start_date" type="date"></label><label>Jornada (%)<input name="work_percentage" type="number" min="1" max="100" step="0.01" value="100" required></label><label>IRPF (%)<input name="irpf" type="number" min="0" max="100" step="0.01" value="2" required></label><label>Usuario vinculado (UUID, opcional)<input name="user_id" placeholder="Dejar vacío si aún no tiene cuenta"></label></div><div class="form-actions"><button class="primary" type="submit">Guardar trabajador</button><button class="secondary" type="button" id="cancel-employee">Cancelar</button></div><p class="error" id="employee-error"></p></form>';
+    box.innerHTML='<form id="employee-form" class="record-form"><h3>Ficha de vigilante</h3><div class="form-grid"><label>Nombre y apellidos<input name="full_name" required maxlength="120"></label><label>DNI / NIE<input name="dni" required maxlength="20"></label><label>TIP<input name="tip" maxlength="40"></label><label>Caducidad TIP<input name="tip_expiry" type="date"></label><label>Teléfono<input name="phone" type="tel" maxlength="30"></label><label>Correo electrónico<input name="email" type="email"></label><label>Puesto<input name="post" list="post-options" placeholder="Ej. VS1"></label><label>Categoría<input name="category" placeholder="Ej. Vigilante de seguridad"></label><label>Servicio / centro<input name="service" placeholder="Ej. Casa Juvenil de Sograndio"></label><label>Usuario<input name="username" maxlength="60"></label><label>Código interno<input name="employee_code" maxlength="40"></label><label>Fecha de alta<input name="start_date" type="date"></label><label>Jornada (%)<input name="work_percentage" type="number" min="1" max="100" step="0.01" value="100" required></label><label>IRPF (%)<input name="irpf" type="number" min="0" max="100" step="0.01" value="2" required></label></div><datalist id="post-options"><option>Puerta</option><option>VS1</option><option>VS2</option><option>VS3</option><option>VS4</option><option>VS5</option><option>VS6</option><option>VS10</option><option>VS11</option><option>VS15</option><option>VS20</option><option>VS30</option><option>VS40</option></datalist><div class="notice"><label><input type="checkbox" name="create_account" id="create-account"> Crear también su cuenta de acceso</label><div id="account-fields" class="form-grid hidden"><label>Contraseña provisional<input name="temporary_password" type="password" minlength="6" autocomplete="new-password"></label><p class="muted">El vigilante deberá cambiar su contraseña tras el primer acceso.</p></div></div><div class="form-actions"><button class="primary" type="submit">Guardar trabajador</button><button class="secondary" type="button" id="cancel-employee">Cancelar</button></div><p class="error" id="employee-error"></p></form>';
     $("page-content").prepend(box);
+    const toggle=box.querySelector("#create-account"),accountFields=box.querySelector("#account-fields");
+    toggle.addEventListener("change",()=>accountFields.classList.toggle("hidden",!toggle.checked));
     $("cancel-employee").addEventListener("click",()=>box.remove());
     $("employee-form").addEventListener("submit",async ev=>{
-      ev.preventDefault();const f=new FormData(ev.currentTarget);
-      const row={full_name:f.get("full_name").trim(),employee_code:f.get("employee_code").trim()||null,start_date:f.get("start_date")||null,work_percentage:Number(f.get("work_percentage")),irpf:Number(f.get("irpf")),active:true,user_id:f.get("user_id").trim()||null};
-      const {error}=await db.from("employees").insert(row);
-      if(error){$("employee-error").textContent="No se pudo guardar: "+error.message;return;}
-      notify("Trabajador guardado en Supabase.");box.remove();await loadEmployees();
+      ev.preventDefault();const form=ev.currentTarget,f=new FormData(form),err=$("employee-error");
+      const createAccount=f.get("create_account")==="on",email=String(f.get("email")||"").trim(),temporaryPassword=String(f.get("temporary_password")||"");
+      if(createAccount&&(!email||temporaryPassword.length<6)){err.textContent="Para crear la cuenta necesitas correo y contraseña provisional de al menos 6 caracteres.";return;}
+      const row={full_name:String(f.get("full_name")).trim(),employee_code:String(f.get("employee_code")).trim()||null,start_date:f.get("start_date")||null,work_percentage:Number(f.get("work_percentage")),irpf:Number(f.get("irpf")),active:true,dni:String(f.get("dni")).trim(),tip:String(f.get("tip")).trim()||null,tip_expiry:f.get("tip_expiry")||null,phone:String(f.get("phone")).trim()||null,email:email||null,post:String(f.get("post")).trim()||null,category:String(f.get("category")).trim()||null,service:String(f.get("service")).trim()||null,username:String(f.get("username")).trim()||null,blocked:false};
+      const submit=form.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent="Guardando…";
+      const {data:employee,error}=await db.from("employees").insert(row).select("id").single();
+      if(error){err.textContent="No se pudo guardar. Comprueba que has aplicado la migración SQL: "+error.message;submit.disabled=false;submit.textContent="Guardar trabajador";return;}
+      if(createAccount){
+        submit.textContent="Creando cuenta…";
+        const {data,error:accountError}=await db.functions.invoke("create-employee-account",{body:{employee_id:employee.id,full_name:row.full_name,email,temporary_password:temporaryPassword}});
+        if(accountError||!data?.success){err.textContent="La ficha se guardó, pero no se pudo crear la cuenta: "+(accountError?.message||data?.error||"Error desconocido");submit.disabled=false;submit.textContent="Guardar trabajador";await loadEmployees();return;}
+      }
+      notify(createAccount?"Trabajador y cuenta creados correctamente.":"Ficha del trabajador guardada en Supabase.");
+      box.remove();await loadEmployees();
     });
   }
   async function personalPage(){
