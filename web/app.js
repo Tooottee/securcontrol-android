@@ -63,15 +63,15 @@
     $("module-table").querySelectorAll("[data-create-account]").forEach(b=>b.addEventListener("click",async()=>{
       const employee=employeesCache.find(e=>String(e.id)===b.dataset.createAccount);
       if(!employee||employee.user_id)return;
-      const email=prompt("Correo electrónico para el acceso:",employee.email||"");
-      if(email===null)return;
-      const cleanEmail=email.trim().toLowerCase();
-      if(!cleanEmail||!cleanEmail.includes("@")){notify("Introduce un correo electrónico válido.");return;}
+      const username=prompt("DNI del vigilante para iniciar sesión:",employee.dni||employee.username||"");
+      if(username===null)return;
+      const cleanUsername=username.trim().toUpperCase().replace(/\\s+/g,"");
+      if(!cleanUsername){notify("Introduce el DNI del vigilante.");return;}
       const password=prompt("Contraseña provisional (mínimo 6 caracteres). El vigilante deberá cambiarla después:", "");
       if(password===null)return;
       if(password.length<6){notify("La contraseña debe tener al menos 6 caracteres.");return;}
       b.disabled=true;b.textContent="Creando…";
-      const {data,error}=await db.functions.invoke("create-employee-account",{body:{employee_id:employee.id,full_name:employee.full_name,email:cleanEmail,temporary_password:password}});
+      const {data,error}=await db.functions.invoke("create-employee-account",{body:{employee_id:employee.id,full_name:employee.full_name,username:cleanUsername,temporary_password:password}});
       if(error||!data?.success){
         notify("No se pudo crear el acceso: "+(data?.error||error?.message||"Error desconocido"));
         b.disabled=false;b.textContent="Crear acceso";return;
@@ -108,14 +108,14 @@
     $("employee-form").addEventListener("submit",async ev=>{
       ev.preventDefault();const form=ev.currentTarget,f=new FormData(form),err=$("employee-error");
       const createAccount=f.get("create_account")==="on",email=String(f.get("email")||"").trim(),temporaryPassword=String(f.get("temporary_password")||"");
-      if(createAccount&&(!email||temporaryPassword.length<6)){err.textContent="Para crear la cuenta necesitas correo y contraseña provisional de al menos 6 caracteres.";return;}
+      if(createAccount&&(!String(f.get("dni")||"").trim()||temporaryPassword.length<6)){err.textContent="Para crear el acceso necesitas el DNI y una contraseña provisional de al menos 6 caracteres.";return;}
       const row={full_name:String(f.get("full_name")).trim(),employee_code:String(f.get("employee_code")).trim()||null,start_date:f.get("start_date")||null,work_percentage:Number(f.get("work_percentage")),irpf:Number(f.get("irpf")),active:true,dni:String(f.get("dni")).trim(),tip:String(f.get("tip")).trim()||null,tip_expiry:f.get("tip_expiry")||null,phone:String(f.get("phone")).trim()||null,email:email||null,post:String(f.get("post")).trim()||null,category:String(f.get("category")).trim()||null,service:String(f.get("service")).trim()||null,username:String(f.get("username")).trim()||null,blocked:false};
       const submit=form.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent="Guardando…";
       const {data:employee,error}=await db.from("employees").insert(row).select("id").single();
       if(error){err.textContent="No se pudo guardar. Comprueba que has aplicado la migración SQL: "+error.message;submit.disabled=false;submit.textContent="Guardar trabajador";return;}
       if(createAccount){
         submit.textContent="Creando cuenta…";
-        const {data,error:accountError}=await db.functions.invoke("create-employee-account",{body:{employee_id:employee.id,full_name:row.full_name,email,temporary_password:temporaryPassword}});
+        const {data,error:accountError}=await db.functions.invoke("create-employee-account",{body:{employee_id:employee.id,full_name:row.full_name,username:String(f.get("dni")).trim().toUpperCase().replace(/\\s+/g,""),temporary_password:temporaryPassword}});
         if(accountError||!data?.success){err.textContent="La ficha se guardó, pero no se pudo crear la cuenta: "+(accountError?.message||data?.error||"Error desconocido");submit.disabled=false;submit.textContent="Guardar trabajador";await loadEmployees();return;}
       }
       notify(createAccount?"Trabajador y cuenta creados correctamente.":"Ficha del trabajador guardada en Supabase.");
@@ -274,9 +274,11 @@
     db=window.supabase.createClient(config.SUPABASE_URL,config.SUPABASE_PUBLISHABLE_KEY);
     $("login-form").addEventListener("submit",async e=>{
       e.preventDefault();$("login-error").textContent="";const b=$("login-form").querySelector("button");b.disabled=true;b.textContent="Comprobando…";
-      const {data,error}=await db.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});
+      const loginValue=$("login-user").value.trim();
+      const loginEmail=loginValue.includes("@")?loginValue.toLowerCase():loginValue.toUpperCase().replace(/\\s+/g,"").toLowerCase()+"@usuarios.securcontrol.invalid";
+      const {data,error}=await db.auth.signInWithPassword({email:loginEmail,password:$("password").value});
       b.disabled=false;b.textContent="Iniciar sesión";
-      if(error){$("login-error").textContent="No se pudo iniciar sesión. Comprueba el correo y la contraseña.";return;}
+      if(error){$("login-error").textContent="No se pudo iniciar sesión. Comprueba el DNI/usuario y la contraseña.";return;}
       try{await startSession(data.session);}catch(err){await db.auth.signOut();showLogin(err.message);}
     });
     $("logout-btn").addEventListener("click",async()=>{await db.auth.signOut();profile=null;authUser=null;showLogin("");});
