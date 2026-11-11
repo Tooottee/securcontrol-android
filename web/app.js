@@ -65,7 +65,7 @@
       if(!employee||employee.user_id)return;
       const username=prompt("DNI del vigilante para iniciar sesión:",employee.dni||employee.username||"");
       if(username===null)return;
-      const cleanUsername=username.trim().toUpperCase().replace(/\\s+/g,"");
+      const cleanUsername=username.trim().toUpperCase().replace(/\s+/g,"");
       if(!cleanUsername){notify("Introduce el DNI del vigilante.");return;}
       const password=prompt("Contraseña provisional (mínimo 6 caracteres). El vigilante deberá cambiarla después:", "");
       if(password===null)return;
@@ -115,7 +115,7 @@
       if(error){err.textContent="No se pudo guardar. Comprueba que has aplicado la migración SQL: "+error.message;submit.disabled=false;submit.textContent="Guardar trabajador";return;}
       if(createAccount){
         submit.textContent="Creando cuenta…";
-        const {data,error:accountError}=await db.functions.invoke("create-employee-account",{body:{employee_id:employee.id,full_name:row.full_name,username:String(f.get("dni")).trim().toUpperCase().replace(/\\s+/g,""),temporary_password:temporaryPassword}});
+        const {data,error:accountError}=await db.functions.invoke("create-employee-account",{body:{employee_id:employee.id,full_name:row.full_name,username:String(f.get("dni")).trim().toUpperCase().replace(/\s+/g,""),temporary_password:temporaryPassword}});
         if(accountError||!data?.success){err.textContent="La ficha se guardó, pero no se pudo crear la cuenta: "+(accountError?.message||data?.error||"Error desconocido");submit.disabled=false;submit.textContent="Guardar trabajador";await loadEmployees();return;}
       }
       notify(createAccount?"Trabajador y cuenta creados correctamente.":"Ficha del trabajador guardada en Supabase.");
@@ -275,7 +275,7 @@
     $("login-form").addEventListener("submit",async e=>{
       e.preventDefault();$("login-error").textContent="";const b=$("login-form").querySelector("button");b.disabled=true;b.textContent="Comprobando…";
       const loginValue=$("login-user").value.trim();
-      const loginEmail=loginValue.includes("@")?loginValue.toLowerCase():loginValue.toUpperCase().replace(/\\s+/g,"").toLowerCase()+"@usuarios.securcontrol.invalid";
+      const loginEmail=loginValue.includes("@")?loginValue.toLowerCase():loginValue.toUpperCase().replace(/\s+/g,"").toLowerCase()+"@usuarios.securcontrol.invalid";
       const {data,error}=await db.auth.signInWithPassword({email:loginEmail,password:$("password").value});
       b.disabled=false;b.textContent="Iniciar sesión";
       if(error){$("login-error").textContent="No se pudo iniciar sesión. Comprueba el DNI/usuario y la contraseña.";return;}
