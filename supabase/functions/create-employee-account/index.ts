@@ -16,21 +16,45 @@ Deno.serve(async (req) => {
 
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  const url = Deno.env.get("SUPABASE_URL")!;
-  const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const url = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) return json({ error: "Sesión no válida" }, 401);
+  const accessToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
 
-  const caller = createClient(url, anon, { global: { headers: { Authorization: authHeader } } });
-  const { data: userData, error: userError } = await caller.auth.getUser();
-  if (userError || !userData.user) return json({ error: "Sesión no válida" }, 401);
+  if (!url || !serviceKey) {
+    console.error("Configuración incompleta: faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY");
+    return json({ error: "La función no tiene configuradas sus credenciales internas en Supabase." }, 500);
+  }
+  if (!accessToken) return json({ error: "No se recibió la sesión del administrador. Cierra sesión y vuelve a entrar." }, 401);
 
-  const admin = createClient(url, serviceKey);
+  // Validate the caller's access token directly against Supabase Auth.
+  const admin = createClient(url, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data: userData, error: userError } = await admin.auth.getUser(accessToken);
+  if (userError || !userData.user) {
+    console.error("Token de sesión rechazado:", userError?.message ?? "sin usuario");
+    return json({ error: "La sesión ha caducado o no es válida. Cierra sesión y vuelve a entrar." }, 401);
+  }
+
   const { data: profile, error: profileError } = await admin
-    .from("profiles").select("role,active").eq("id", userData.user.id).maybeSingle();
-  if (profileError || profile?.role !== "admin" || profile.active !== true)
-    return json({ error: "Sólo un administrador activo puede crear cuentas" }, 403);
+    .from("profiles")
+    .select("role,active")
+    .eq("id", userData.user.id)
+    .maybeSingle();
+
+  if (profileError) {
+    console.error("No se pudo consultar el perfil administrador:", profileError.message);
+    return json({ error: "No se pudo verificar el perfil de administrador." }, 500);
+  }
+  if (String(profile?.role ?? "").trim().toLowerCase() !== "admin" || profile?.active !== true) {
+    console.error("Acceso rechazado: perfil no administrador o inactivo", {
+      user_id: userData.user.id,
+      role: profile?.role ?? null,
+      active: profile?.active ?? null,
+    });
+    return json({ error: "La sesión es válida, pero el perfil asociado no figura como administrador activo." }, 403);
+  }
 
   let input: Record<string, unknown>;
   try { input = await req.json(); } catch { return json({ error: "JSON no válido" }, 400); }
