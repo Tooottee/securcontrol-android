@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>SECURCONTROL | Panel</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script defer src="./supabase-config.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <main id="login-view" class="login-wrap">
+    <section class="login-card">
+      <div class="brand-mark">SC</div>
+      <p class="eyebrow">GESTIÓN DE SEGURIDAD</p>
+      <h1>SECURCONTROL</h1>
+      <p class="muted">Accede a tu espacio de trabajo</p>
+      <form id="login-form">
+        <label for="email">Correo electrónico</label>
+        <input id="email" name="email" type="email" autocomplete="username" required placeholder="usuario@empresa.com">
+        <label for="password">Contraseña</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Tu contraseña">
+        <button class="primary full" type="submit">Iniciar sesión</button>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+      <p class="tiny muted">Acceso protegido mediante Supabase Auth.</p>
+    </section>
+  </main>
+
+  <div id="app-view" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark small">SC</span><div><strong>SECURCONTROL</strong><small>CONTROL OPERATIVO</small></div></div>
+      <div class="user-chip"><span class="avatar" id="user-avatar">U</span><div><strong id="user-name">Usuario</strong><small id="user-role">Cuenta</small></div></div>
+      <nav id="main-nav" aria-label="Navegación principal"></nav>
+      <button id="logout-btn" class="logout">↪ Cerrar sesión</button>
+    </aside>
+    <main class="workspace">
+      <header class="topbar"><div><p class="eyebrow">ÁREA DE TRABAJO</p><h1 id="page-title">Resumen general</h1></div><span class="connection"><i></i> Conectado</span></header>
+      <section id="page-content" class="content"></section>
+      <footer>SECURCONTROL · Plataforma de gestión · Los datos se consultan según tus permisos.</footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+</body>
+</html>
