@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
   try { input = await req.json(); } catch { return json({ error: "JSON no válido" }, 400); }
 
   const fullName = String(input.full_name ?? "").trim();
-  const username = String(input.username ?? "").trim().toUpperCase().replace(/\\s+/g, "");
+  const username = String(input.username ?? "").trim().toUpperCase().replace(/\s+/g, "");
   const email = username ? username.toLowerCase() + "@usuarios.securcontrol.invalid" : "";
   const password = String(input.temporary_password ?? "");
   const employeeId = String(input.employee_id ?? "");
@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
     .from("employees").select("id,user_id,dni,username").eq("id", employeeId).maybeSingle();
   if (employeeError || !employee) return json({ error: "Trabajador no encontrado" }, 404);
   if (employee.user_id) return json({ error: "Este trabajador ya tiene una cuenta vinculada" }, 409);
-  if (String(employee.dni ?? "").trim().toUpperCase().replace(/\\s+/g, "") !== username)
+  if (String(employee.dni ?? "").trim().toUpperCase().replace(/\s+/g, "") !== username)
     return json({ error: "El usuario debe coincidir con el DNI guardado en la ficha del trabajador" }, 400);
 
   const { data: created, error: createError } = await admin.auth.admin.createUser({
