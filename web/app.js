@@ -107,19 +107,37 @@
     }));
   }
   function shiftForm(){
-    const box=document.createElement("div");box.className="form-panel";box.id="shift-form-panel";
-    const opts=employeesCache.filter(e=>e.active).map(e=>'<option value="'+esc(e.id)+'">'+esc(e.full_name)+'</option>').join("");
-    box.innerHTML='<form id="shift-form" class="record-form"><h3>Asignar turno</h3><div class="form-grid"><label>Trabajador<select name="employee_id" required>'+opts+'</select></label><label>Puesto<input name="position" required placeholder="Ej. VS1"></label><label>Tipo de turno<select name="shift_type" required><option value="Mañana">Mañana</option><option value="Tarde">Tarde</option><option value="Tarde2">Tarde2</option><option value="Noche">Noche</option><option value="Otro">Otro</option></select></label><label>Inicio<input name="start_at" type="datetime-local" required></label><label>Fin<input name="end_at" type="datetime-local" required></label></div><div class="form-actions"><button class="primary" type="submit">Guardar turno</button><button class="secondary" type="button" id="cancel-shift">Cancelar</button></div><p class="error" id="shift-error"></p></form>';
+    const box=document.createElement("div");box.className="form-panel";
+    const posts=["Puerta","VS1","VS2","VS3","VS4","VS5","VS6","VS10","VS11","VS15","VS20","VS30","VS40"];
+    const postOptions=posts.map(p=>'<option value="'+p+'">'+p+'</option>').join("");
+    box.innerHTML='<form id="shift-form" class="record-form"><h3>Crear cuadrante / asignar turnos</h3><div class="form-grid"><label>Trabajador<select name="employee_id" required></select></label><label>Puesto<select name="position" required>'+postOptions+'</select></label><label>Fecha de inicio<input name="date_from" type="date" required></label><label>Fecha de fin<input name="date_to" type="date"></label><label>Turno inicial<select name="shift_type" required></select></label><label>Servicio / centro<input name="service" placeholder="Ej. Casa Juvenil de Sograndio"></label></div><label class="rotation-option"><input name="rotation" type="checkbox"> Rotar automáticamente entre los turnos disponibles cada día</label><div class="form-actions"><button class="primary" type="submit">Asignar turnos</button><button class="secondary" type="button" id="cancel-shift">Cancelar</button></div><p class="error" id="shift-error"></p></form>';
     $("page-content").prepend(box);
+    const form=box.querySelector("#shift-form"),post=form.elements.position,shift=form.elements.shift_type,staff=form.elements.employee_id;
+    employeesCache.filter(e=>e.active&&!e.blocked).forEach(e=>staff.add(new Option(e.full_name,e.id)));
+    const optionsFor=p=>["VS6","VS10","VS20","VS30","VS40"].includes(p)?["Mañana 07:00-15:00","Tarde 15:00-23:00"]:["Mañana 07:00-15:00","Tarde 15:00-22:00","Noche 22:00-07:00"];
+    const refresh=()=>{const prev=shift.value;shift.replaceChildren(...optionsFor(post.value).map(x=>new Option(x,x)));if(optionsFor(post.value).includes(prev))shift.value=prev;};
+    post.addEventListener("change",refresh);refresh();
     $("cancel-shift").addEventListener("click",()=>box.remove());
-    $("shift-form").addEventListener("submit",async ev=>{
-      ev.preventDefault();const f=new FormData(ev.currentTarget);
-      const start=new Date(f.get("start_at")),end=new Date(f.get("end_at"));
-      if(!(end>start)){$("shift-error").textContent="La hora de fin debe ser posterior a la de inicio. Para noches, selecciona el día siguiente.";return;}
-      const row={employee_id:f.get("employee_id"),position:f.get("position").trim(),shift_type:f.get("shift_type"),start_at:start.toISOString(),end_at:end.toISOString()};
-      const {error}=await db.from("shifts").insert(row);
-      if(error){$("shift-error").textContent="No se pudo guardar: "+error.message;return;}
-      notify("Turno guardado en Supabase.");box.remove();await loadShifts();
+    form.addEventListener("submit",async ev=>{
+      ev.preventDefault();const f=new FormData(form),err=$("shift-error");
+      const from=new Date(f.get("date_from")+"T12:00:00"),to=f.get("date_to")?new Date(f.get("date_to")+"T12:00:00"):new Date(from);
+      if(Number.isNaN(from.getTime())||Number.isNaN(to.getTime())||to<from){err.textContent="Revisa las fechas del cuadrante.";return;}
+      const days=Math.round((to-from)/86400000)+1;if(days>93){err.textContent="El periodo máximo es de 93 días.";return;}
+      const p=String(f.get("position")),opts=optionsFor(p),base=opts.indexOf(String(f.get("shift_type"))),rotation=f.get("rotation")==="on";
+      const rows=[];
+      for(let i=0;i<days;i++){
+        const d=new Date(from);d.setDate(d.getDate()+i);
+        const sh=opts[rotation?(base+i)%opts.length:base];
+        const match=sh.match(/(\d{2}:\d{2})-(\d{2}:\d{2})/);if(!match)continue;
+        const startAt=new Date(d);const [aH,aM]=match[1].split(":").map(Number);startAt.setHours(aH,aM,0,0);
+        const endAt=new Date(d);const [bH,bM]=match[2].split(":").map(Number);endAt.setHours(bH,bM,0,0);if(endAt<=startAt)endAt.setDate(endAt.getDate()+1);
+        const hours=sh.includes("07:00-15:00")||sh.includes("15:00-23:00")?8:sh.includes("15:00-22:00")?7:9;
+        rows.push({employee_id:f.get("employee_id"),position:p,shift_type:sh,start_at:startAt.toISOString(),end_at:endAt.toISOString(),service:String(f.get("service")||"").trim()||null,hours,holiday:d.getDay()===0});
+      }
+      const submit=form.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent="Asignando…";
+      const {error}=await db.from("shifts").insert(rows);
+      if(error){err.textContent="No se pudieron asignar los turnos: "+error.message;submit.disabled=false;submit.textContent="Asignar turnos";return;}
+      notify(rows.length+" turno(s) asignado(s) correctamente.");box.remove();await loadShifts();
     });
   }
   async function shiftsPage(){
