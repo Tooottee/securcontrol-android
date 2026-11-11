@@ -47,7 +47,7 @@
   }
   function renderEmployeeRows(rows){
     if(!rows.length)return '<p class="muted">Todavía no hay trabajadores registrados.</p>';
-    return '<table class="data-table"><thead><tr><th>Nombre</th><th>Código</th><th>Jornada</th><th>IRPF</th><th>Estado</th><th></th></tr></thead><tbody>'+rows.map(e=>'<tr><td>'+esc(e.full_name)+'</td><td>'+esc(e.employee_code||"—")+'</td><td>'+esc(e.work_percentage??100)+'%</td><td>'+esc(e.irpf??0)+'%</td><td><span class="tag">'+(e.active?"Activo":"Inactivo")+'</span></td><td><button class="secondary small-action" data-toggle="'+esc(e.id)+'" data-active="'+String(!!e.active)+'">'+(e.active?"Desactivar":"Activar")+'</button></td></tr>').join("")+'</tbody></table>';
+    return '<table class="data-table"><thead><tr><th>Nombre</th><th>Código</th><th>Jornada</th><th>IRPF</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>'+rows.map(e=>'<tr><td>'+esc(e.full_name)+'</td><td>'+esc(e.employee_code||"—")+'</td><td>'+esc(e.work_percentage??100)+'%</td><td>'+esc(e.irpf??0)+'%</td><td><span class="tag">'+(e.active?"Activo":"Inactivo")+'</span></td><td><button class="secondary small-action" data-toggle="'+esc(e.id)+'" data-active="'+String(!!e.active)+'">'+(e.active?"Desactivar":"Activar")+'</button> <button class="secondary small-action" data-employee-delete="'+esc(e.id)+'">Eliminar</button></td></tr>').join("")+'</tbody></table>';
   }
   async function loadEmployees(){
     const {data,error}=await db.from("employees").select("*").order("full_name",{ascending:true});
@@ -59,6 +59,24 @@
       const {error}=await db.from("employees").update({active}).eq("id",b.dataset.toggle);
       if(error){notify("No se pudo actualizar el trabajador: "+error.message);return;}
       notify("Estado del trabajador actualizado.");await loadEmployees();
+    }));
+    $("module-table").querySelectorAll("[data-employee-delete]").forEach(b=>b.addEventListener("click",async()=>{
+      const employee=employeesCache.find(e=>String(e.id)===b.dataset.employeeDelete);
+      if(!employee)return;
+      if(employee.user_id){
+        notify("Este trabajador tiene una cuenta de acceso vinculada. Desactívalo; no se puede borrar desde aquí para evitar dejar una cuenta huérfana.");
+        return;
+      }
+      if(!confirm("¿Eliminar definitivamente la ficha de "+employee.full_name+"? Esta acción no se puede deshacer. Si tiene turnos, fichajes, vacaciones u otros registros asociados, Supabase impedirá el borrado."))return;
+      b.disabled=true;
+      const {error}=await db.from("employees").delete().eq("id",employee.id);
+      if(error){
+        notify("No se pudo eliminar. Puede tener registros asociados (turnos, fichajes, vacaciones o nómina): "+error.message);
+        b.disabled=false;
+        return;
+      }
+      notify("Ficha del trabajador eliminada.");
+      await loadEmployees();
     }));
   }
   function employeeForm(){
