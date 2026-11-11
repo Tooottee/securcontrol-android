@@ -60,20 +60,23 @@ Deno.serve(async (req) => {
   try { input = await req.json(); } catch { return json({ error: "JSON no válido" }, 400); }
 
   const fullName = String(input.full_name ?? "").trim();
-  const email = String(input.email ?? "").trim().toLowerCase();
+  const username = String(input.username ?? "").trim().toUpperCase().replace(/\\s+/g, "");
+  const email = username ? username.toLowerCase() + "@usuarios.securcontrol.invalid" : "";
   const password = String(input.temporary_password ?? "");
   const employeeId = String(input.employee_id ?? "");
-  if (!fullName || !email || password.length < 6 || !employeeId)
-    return json({ error: "Nombre, correo, contraseña provisional (mínimo 6 caracteres) y trabajador son obligatorios" }, 400);
+  if (!fullName || !username || password.length < 6 || !employeeId)
+    return json({ error: "Nombre, DNI/usuario, contraseña provisional (mínimo 6 caracteres) y trabajador son obligatorios" }, 400);
 
   const { data: employee, error: employeeError } = await admin
-    .from("employees").select("id,user_id").eq("id", employeeId).maybeSingle();
+    .from("employees").select("id,user_id,dni,username").eq("id", employeeId).maybeSingle();
   if (employeeError || !employee) return json({ error: "Trabajador no encontrado" }, 404);
   if (employee.user_id) return json({ error: "Este trabajador ya tiene una cuenta vinculada" }, 409);
+  if (String(employee.dni ?? "").trim().toUpperCase().replace(/\\s+/g, "") !== username)
+    return json({ error: "El usuario debe coincidir con el DNI guardado en la ficha del trabajador" }, 400);
 
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email, password, email_confirm: true,
-    user_metadata: { full_name: fullName, must_change_password: true }
+    user_metadata: { full_name: fullName, username, must_change_password: true }
   });
   if (createError || !created.user) return json({ error: createError?.message ?? "No se pudo crear el usuario" }, 400);
 
@@ -87,7 +90,7 @@ Deno.serve(async (req) => {
   }
 
   const { error: linkError } = await admin.from("employees").update({
-    user_id: userId, email, full_name: fullName
+    user_id: userId, username, full_name: fullName
   }).eq("id", employeeId);
   if (linkError) {
     await admin.from("profiles").delete().eq("id", userId);
