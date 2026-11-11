@@ -168,6 +168,67 @@
       await loadShifts();
     }catch(e){$("module-table").innerHTML='<p class="error">No se pudieron consultar los cuadrantes: '+esc(e.message)+'</p>';}
   }
+  const coveragePosts=["Puerta","VS1","VS2","VS3","VS4","VS5","VS6","VS10","VS11","VS15","VS20","VS30","VS40"];
+  const coverageShifts=post=>["VS6","VS10","VS20","VS30","VS40"].includes(post)?["Mañana 07:00-15:00","Tarde 15:00-23:00"]:["Mañana 07:00-15:00","Tarde 15:00-22:00","Noche 22:00-07:00"];
+  const localDateKey=value=>{const d=new Date(value);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");};
+  let coverageMonthOffset=0;
+  async function coveragePage(){
+    const base=new Date();base.setDate(1);base.setMonth(base.getMonth()+coverageMonthOffset);
+    const year=base.getFullYear(),month=base.getMonth(),monthName=base.toLocaleDateString("es-ES",{month:"long",year:"numeric"});
+    const first=new Date(year,month,1),last=new Date(year,month+1,1);
+    setContent('<section class="panel"><div class="panel-head"><div><h3>Cobertura mensual</h3><p>Consulta los puestos y días pendientes.</p></div><div class="form-actions"><button class="secondary" id="coverage-prev">‹</button><strong id="coverage-month">'+esc(monthName.toUpperCase())+'</strong><button class="secondary" id="coverage-next">›</button></div></div><div id="coverage-summary" class="notice">Calculando cobertura…</div><div id="coverage-posts" class="stats-grid"></div><div id="coverage-detail"></div></section>');
+    $("coverage-prev").addEventListener("click",()=>{coverageMonthOffset--;coveragePage();});
+    $("coverage-next").addEventListener("click",()=>{coverageMonthOffset++;coveragePage();});
+    const {data:shifts,error}=await db.from("shifts").select("id,employee_id,position,shift_type,start_at,end_at,service,hours").gte("start_at",first.toISOString()).lt("start_at",last.toISOString());
+    if(error){$("coverage-summary").textContent="No se pudo consultar la cobertura: "+error.message;return;}
+    const {data:staff, error:staffError}=await db.from("employees").select("id,full_name,active,blocked").eq("active",true).order("full_name");
+    if(staffError){$("coverage-summary").textContent="No se pudo cargar el personal: "+staffError.message;return;}
+    employeesCache=staff||[];
+    const bySlot=new Map();
+    (shifts||[]).forEach(s=>{const k=localDateKey(s.start_at)+"|"+s.position+"|"+s.shift_type;if(!bySlot.has(k))bySlot.set(k,[]);bySlot.get(k).push(s);});
+    const days=new Date(year,month+1,0).getDate();
+    let total=0,covered=0;
+    const postsHtml=coveragePosts.map(post=>{
+      let missing=0,filled=0;
+      for(let day=1;day<=days;day++)for(const shift of coverageShifts(post)){
+        total++;const key=year+"-"+String(month+1).padStart(2,"0")+"-"+String(day).padStart(2,"0")+"|"+post+"|"+shift;
+        if((bySlot.get(key)||[]).length){covered++;filled++;}else missing++;
+      }
+      return '<article class="stat-card"><span>'+esc(post)+'</span><strong>'+ (missing===0?'Completo':missing+' huecos')+'</strong><small>'+filled+' turnos cubiertos</small><button class="secondary small-action" data-coverage-post="'+esc(post)+'">Ver días y asignar</button></article>';
+    }).join("");
+    const pct=total?Math.round(covered*100/total):0;
+    $("coverage-summary").innerHTML='<strong>'+pct+'% de cobertura mensual</strong><p>'+covered+' de '+total+' turnos cubiertos · '+(total-covered)+' sin cubrir.</p><p>Se calcula según los puestos y turnos definidos en SECURCONTROL.</p>';
+    $("coverage-posts").innerHTML=postsHtml;
+    $("coverage-posts").querySelectorAll("[data-coverage-post]").forEach(b=>b.addEventListener("click",()=>showCoverageDetail(b.dataset.coveragePost,year,month,days,bySlot)));
+  }
+  function showCoverageDetail(post,year,month,days,bySlot){
+    const detail=$("coverage-detail");
+    let html='<div class="notice"><h3>'+esc(post)+' · '+new Date(year,month,1).toLocaleDateString("es-ES",{month:"long",year:"numeric"})+'</h3><div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha</th><th>Turno</th><th>Asignación</th><th></th></tr></thead><tbody>';
+    for(let day=1;day<=days;day++)for(const shift of coverageShifts(post)){
+      const date=year+"-"+String(month+1).padStart(2,"0")+"-"+String(day).padStart(2,"0"),rows=bySlot.get(date+"|"+post+"|"+shift)||[];
+      if(rows.length)rows.forEach(s=>{const employee=employeesCache.find(e=>String(e.id)===String(s.employee_id));html+='<tr><td>'+String(day).padStart(2,"0")+'/'+String(month+1).padStart(2,"0")+'</td><td>'+esc(shift)+'</td><td>'+esc(employee?.full_name||"Trabajador asignado")+'</td><td>—</td></tr>';});
+      else html+='<tr><td>'+String(day).padStart(2,"0")+'/'+String(month+1).padStart(2,"0")+'</td><td>'+esc(shift)+'</td><td><span class="tag">Sin cubrir</span></td><td><button class="primary small-action" data-coverage-assign="'+esc(date)+'" data-shift="'+esc(shift)+'">Asignar</button></td></tr>';
+    }
+    html+='</tbody></table></div></div>';detail.innerHTML=html;
+    detail.querySelectorAll("[data-coverage-assign]").forEach(b=>b.addEventListener("click",()=>assignCoverageSlot(b.dataset.coverageAssign,post,b.dataset.shift)));
+  }
+  async function assignCoverageSlot(date,post,shift){
+    const staff=employeesCache.filter(e=>e.active&&!e.blocked);
+    if(!staff.length){notify("No hay trabajadores activos disponibles.");return;}
+    const selector=document.createElement("div");selector.className="form-panel";
+    selector.innerHTML='<form class="record-form"><h3>Asignar '+esc(post)+' · '+esc(date)+'</h3><label>Trabajador<select name="employee_id" required></select></label><label>Servicio / centro<input name="service" placeholder="Servicio o centro"></label><div class="form-actions"><button class="primary" type="submit">Guardar asignación</button><button class="secondary" type="button">Cancelar</button></div></form>';
+    const select=selector.querySelector("select");staff.forEach(e=>select.add(new Option(e.full_name,e.id)));
+    $("coverage-detail").prepend(selector);
+    selector.querySelector('button[type="button"]').addEventListener("click",()=>selector.remove());
+    selector.querySelector("form").addEventListener("submit",async ev=>{
+      ev.preventDefault();const f=new FormData(ev.currentTarget),match=shift.match(/(\d{2}):(\d{2})-(\d{2}):(\d{2})/);
+      const start=new Date(date+"T"+match[1]+":"+match[2]+":00"),end=new Date(date+"T"+match[3]+":"+match[4]+":00");if(end<=start)end.setDate(end.getDate()+1);
+      const hours=shift.includes("15:00-22:00")?7:shift.includes("22:00-07:00")?9:8;
+      const {error}=await db.from("shifts").insert({employee_id:f.get("employee_id"),position:post,shift_type:shift,start_at:start.toISOString(),end_at:end.toISOString(),service:String(f.get("service")||"").trim()||null,hours,holiday:start.getDay()===0});
+      if(error){notify("No se pudo asignar: "+error.message);return;}
+      notify("Turno asignado correctamente.");coveragePage();
+    });
+  }
   async function renderPage(id){
     const allowed=(profile.role==="admin"?adminNav:guardNav).some(x=>x[0]===id);
     if(!allowed){notify("No tienes permiso para esta sección.");return;}
@@ -175,6 +236,7 @@
     if(id==="dashboard"){await dashboard();return;}
     if(id==="personal"&&profile.role==="admin"){await personalPage();return;}
     if(id==="shifts"&&profile.role==="admin"){await shiftsPage();return;}
+    if(id==="coverage"&&profile.role==="admin"){await coveragePage();return;}
     const desc={coverage:"Consulta de cobertura de puestos.",vacations:"Gestión de solicitudes de vacaciones.",hours:"Horas ordinarias, extras, nocturnidad y festivos.",payroll:"Configuración y consulta de nóminas.",docs:"Documentación de trabajo.",material:"Inventario y control de material.",punches:"Registro de entradas y salidas.", "my-shifts":"Consulta de turnos asignados.","my-payroll":"Información de nómina.",profile:"Datos de tu cuenta."};
     setContent('<section class="panel module-panel"><span class="module-icon">✦</span><p class="eyebrow">MÓDULO SECURCONTROL</p><h2>'+esc(labels[id])+'</h2><p>'+esc(desc[id]||"")+'</p><div class="notice"><strong>Módulo pendiente de conexión</strong><p>Esta sección se conectará en la siguiente fase. Los módulos Personal y Cuadrantes ya consultan y guardan datos en Supabase.</p></div><button class="secondary" id="back-dashboard">Volver al resumen</button></section>');
     $("back-dashboard").addEventListener("click",()=>renderPage("dashboard"));
