@@ -248,6 +248,71 @@
       notify("Turno asignado correctamente.");coveragePage();
     });
   }
+
+  async function getOwnEmployee(){
+    const {data,error}=await db.from("employees").select("*").eq("user_id",authUser.id).maybeSingle();
+    if(error)throw error;
+    if(!data)throw new Error("No hay una ficha de trabajador vinculada a esta cuenta. Contacta con administración.");
+    return data;
+  }
+  let guardMonthOffset=0;
+  async function myShiftsPage(){
+    const employee=await getOwnEmployee();
+    const month=new Date();month.setDate(1);month.setMonth(month.getMonth()+guardMonthOffset);
+    const start=new Date(month.getFullYear(),month.getMonth(),1),end=new Date(month.getFullYear(),month.getMonth()+1,1);
+    const {data:shifts,error}=await db.from("shifts").select("*").eq("employee_id",employee.id).gte("start_at",start.toISOString()).lt("start_at",end.toISOString()).order("start_at");
+    if(error)throw error;
+    const {data:itRows,itError}=await db.from("it_leaves").select("*").eq("employee_id",employee.id).lte("start_date",localDateKey(new Date(end.getTime()-86400000))).gte("end_date",localDateKey(start));
+    if(itError)throw itError;
+    const days=new Date(month.getFullYear(),month.getMonth()+1,0).getDate();
+    const byDay=new Map((shifts||[]).map(s=>[localDateKey(s.start_at),s]));
+    const itDays=new Set();
+    (itRows||[]).forEach(r=>{const a=new Date(r.start_date+"T12:00:00"),b=new Date(r.end_date+"T12:00:00");for(let d=new Date(a);d<=b;d.setDate(d.getDate()+1))itDays.add(localDateKey(d));});
+    let totalHours=0;
+    const cells=Array.from({length:days},(_,i)=>{
+      const d=new Date(month.getFullYear(),month.getMonth(),i+1),key=localDateKey(d),s=byDay.get(key),isIT=itDays.has(key);
+      if(s)totalHours+=Number(s.hours||0);
+      const code=s?(s.shift_type.startsWith("Mañana")?"M":s.shift_type.startsWith("Tarde")?"T":"N"):isIT?"IT":"—";
+      return '<div class="calendar-day"><small>'+String(i+1).padStart(2,"0")+'</small><strong class="'+(s?"":"muted")+'">'+code+'</strong></div>';
+    }).join("");
+    const monthLabel=month.toLocaleDateString("es-ES",{month:"long",year:"numeric"});
+    setContent('<section class="panel"><div class="panel-head"><div><h3>Mi cuadrante</h3><p>'+esc(employee.post||"")+' · '+esc(employee.service||"")+'</p></div><div class="form-actions"><button class="secondary" id="guard-month-prev">‹</button><strong>'+esc(monthLabel.toUpperCase())+'</strong><button class="secondary" id="guard-month-next">›</button></div></div><div class="stats-grid">'+stat("HORAS ASIGNADAS",totalHours.toFixed(2)+" h","En el mes")+'</div><div class="guard-calendar">'+cells+'</div><div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha</th><th>Turno</th><th>Puesto</th><th>Servicio</th><th>Horas</th></tr></thead><tbody>'+(shifts||[]).map(s=>'<tr><td>'+dateText(s.start_at)+'</td><td>'+esc(s.shift_type)+'</td><td>'+esc(s.position)+'</td><td>'+esc(s.service||employee.service||"—")+'</td><td>'+esc(s.hours??"—")+'</td></tr>').join("")+'</tbody></table></div></section>');
+    $("guard-month-prev").addEventListener("click",()=>{guardMonthOffset--;myShiftsPage().catch(e=>notify(e.message));});
+    $("guard-month-next").addEventListener("click",()=>{guardMonthOffset++;myShiftsPage().catch(e=>notify(e.message));});
+  }
+  async function punchesPage(){
+    const employee=await getOwnEmployee();
+    const {data:recent,error}=await db.from("time_punches").select("*").eq("employee_id",employee.id).order("punched_at",{ascending:false}).limit(30);
+    if(error)throw error;
+    const latest=recent?.[0],isOpen=latest?.punch_type==="entrada";
+    setContent('<section class="panel"><h3>Fichar</h3><p>Registra tu entrada y salida de jornada.</p><div class="notice"><strong>'+(isOpen?"Tienes una entrada abierta":"No tienes ninguna entrada abierta")+'</strong><p>'+(latest?"Último registro: "+dateText(latest.punched_at):"Todavía no hay fichajes registrados.")+'</p></div><div class="form-actions"><button class="primary" id="punch-entry" '+(isOpen?"disabled":"")+' type="button">Registrar entrada</button><button class="primary" id="punch-exit" '+(!isOpen?"disabled":"")+' type="button">Registrar salida</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha y hora</th><th>Tipo</th><th>Notas</th></tr></thead><tbody>'+(recent||[]).map(p=>'<tr><td>'+dateText(p.punched_at)+'</td><td>'+esc(p.punch_type)+'</td><td>'+esc(p.notes||"—")+'</td></tr>').join("")+'</tbody></table></div></section>');
+    async function punch(type){
+      const b=$(type==="entrada"?"punch-entry":"punch-exit");b.disabled=true;
+      const {data:shift}=await db.from("shifts").select("id").eq("employee_id",employee.id).lte("start_at",new Date().toISOString()).gte("end_at",new Date().toISOString()).order("start_at",{ascending:false}).limit(1).maybeSingle();
+      const {error}=await db.from("time_punches").insert({employee_id:employee.id,shift_id:shift?.id||null,punch_type:type,punched_at:new Date().toISOString()});
+      if(error){notify("No se pudo registrar el fichaje: "+error.message);b.disabled=false;return;}
+      notify(type==="entrada"?"Entrada registrada.":"Salida registrada.");await punchesPage();
+    }
+    $("punch-entry").addEventListener("click",()=>punch("entrada"));
+    $("punch-exit").addEventListener("click",()=>punch("salida"));
+  }
+  async function myPayrollPage(){
+    const employee=await getOwnEmployee();
+    const {data:settings,error}=await db.from("payroll_settings").select("*").eq("employee_id",employee.id).maybeSingle();
+    if(error)throw error;
+    const {data:shifts, error:shiftError}=await db.from("shifts").select("hours,shift_type,start_at").eq("employee_id",employee.id).gte("start_at",new Date(new Date().getFullYear(),new Date().getMonth(),1).toISOString()).lt("start_at",new Date(new Date().getFullYear(),new Date().getMonth()+1,1).toISOString());
+    if(shiftError)throw shiftError;
+    const hours=(shifts||[]).reduce((n,s)=>n+Number(s.hours||0),0);
+    const nights=(shifts||[]).reduce((n,s)=>n+(s.shift_type.startsWith("Noche")?8:s.shift_type.startsWith("Tarde 15:00-23:00")?1:0),0);
+    const extras=Math.max(0,hours-162),base=Number(settings?.base_salary||0),extraPay=extras*Number(settings?.overtime_rate||13),nightPay=nights*Number(settings?.night_rate||1.26);
+    const gross=base+Number(settings?.transport||0)+Number(settings?.dangerousness||0)+Number(settings?.uniform_allowance||0)+Number(settings?.sograndio||0)+Number(settings?.sograndio_dangerousness||0)+extraPay+nightPay;
+    setContent('<section class="panel"><h3>Mi nómina</h3><p>Estimación orientativa del mes actual. No sustituye a una nómina oficial.</p><div class="stats-grid">'+stat("HORAS DEL MES",hours.toFixed(2)+" h","Según turnos asignados")+stat("HORAS EXTRA",extras.toFixed(2)+" h","Sobre 162 horas")+stat("NOCTURNIDAD",nights.toFixed(2)+" h","Cómputo orientativo")+stat("BRUTO ESTIMADO",gross.toFixed(2)+" €","Antes de deducciones")+'</div><div class="notice">Los importes dependen de la configuración individual y deben contrastarse con la nómina real, el convenio y los festivos aplicables.</div></section>');
+  }
+  async function myProfilePage(){
+    const e=await getOwnEmployee();
+    setContent('<section class="panel"><h3>Mi perfil</h3><div class="form-grid"><label>Nombre<input readonly value="'+esc(e.full_name)+'"></label><label>DNI / NIE<input readonly value="'+esc(e.dni||"")+'"></label><label>TIP<input readonly value="'+esc(e.tip||"")+'"></label><label>Caducidad TIP<input readonly value="'+esc(e.tip_expiry||"")+'"></label><label>Teléfono<input readonly value="'+esc(e.phone||"")+'"></label><label>Correo electrónico<input readonly value="'+esc(e.email||"")+'"></label><label>Puesto<input readonly value="'+esc(e.post||"")+'"></label><label>Categoría<input readonly value="'+esc(e.category||"")+'"></label><label>Servicio / centro<input readonly value="'+esc(e.service||"")+'"></label><label>Código interno<input readonly value="'+esc(e.employee_code||"")+'"></label><label>Jornada<input readonly value="'+esc(e.work_percentage??100)+'%"></label></div></section>');
+  }
+
   async function renderPage(id){
     const allowed=(profile.role==="admin"?adminNav:guardNav).some(x=>x[0]===id);
     if(!allowed){notify("No tienes permiso para esta sección.");return;}
@@ -256,6 +321,10 @@
     if(id==="personal"&&profile.role==="admin"){await personalPage();return;}
     if(id==="shifts"&&profile.role==="admin"){await shiftsPage();return;}
     if(id==="coverage"&&profile.role==="admin"){await coveragePage();return;}
+    if(id==="my-shifts"){try{await myShiftsPage();}catch(e){setContent('<section class="panel"><p class="error">'+esc(e.message)+'</p></section>');}return;}
+    if(id==="punches"){try{await punchesPage();}catch(e){setContent('<section class="panel"><p class="error">'+esc(e.message)+'</p></section>');}return;}
+    if(id==="my-payroll"){try{await myPayrollPage();}catch(e){setContent('<section class="panel"><p class="error">'+esc(e.message)+'</p></section>');}return;}
+    if(id==="profile"){try{await myProfilePage();}catch(e){setContent('<section class="panel"><p class="error">'+esc(e.message)+'</p></section>');}return;}
     const desc={coverage:"Consulta de cobertura de puestos.",vacations:"Gestión de solicitudes de vacaciones.",hours:"Horas ordinarias, extras, nocturnidad y festivos.",payroll:"Configuración y consulta de nóminas.",docs:"Documentación de trabajo.",material:"Inventario y control de material.",punches:"Registro de entradas y salidas.", "my-shifts":"Consulta de turnos asignados.","my-payroll":"Información de nómina.",profile:"Datos de tu cuenta."};
     setContent('<section class="panel module-panel"><span class="module-icon">✦</span><p class="eyebrow">MÓDULO SECURCONTROL</p><h2>'+esc(labels[id])+'</h2><p>'+esc(desc[id]||"")+'</p><div class="notice"><strong>Módulo pendiente de conexión</strong><p>Esta sección se conectará en la siguiente fase. Los módulos Personal y Cuadrantes ya consultan y guardan datos en Supabase.</p></div><button class="secondary" id="back-dashboard">Volver al resumen</button></section>');
     $("back-dashboard").addEventListener("click",()=>renderPage("dashboard"));
