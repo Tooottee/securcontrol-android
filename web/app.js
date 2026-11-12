@@ -262,23 +262,33 @@
     const start=new Date(month.getFullYear(),month.getMonth(),1),end=new Date(month.getFullYear(),month.getMonth()+1,1);
     const {data:shifts,error}=await db.from("shifts").select("*").eq("employee_id",employee.id).gte("start_at",start.toISOString()).lt("start_at",end.toISOString()).order("start_at");
     if(error)throw error;
-    const {data:itRows,itError}=await db.from("it_leaves").select("*").eq("employee_id",employee.id).lte("start_date",localDateKey(new Date(end.getTime()-86400000))).gte("end_date",localDateKey(start));
+    const {data:itRows,error:itError}=await db.from("it_leaves").select("*").eq("employee_id",employee.id).lte("start_date",localDateKey(new Date(end.getTime()-86400000))).gte("end_date",localDateKey(start));
     if(itError)throw itError;
     const days=new Date(month.getFullYear(),month.getMonth()+1,0).getDate();
-    const byDay=new Map((shifts||[]).map(s=>[localDateKey(s.start_at),s]));
+    const byDay=new Map();
+    (shifts||[]).forEach(s=>{const key=localDateKey(s.start_at);if(!byDay.has(key))byDay.set(key,[]);byDay.get(key).push(s);});
     const itDays=new Set();
     (itRows||[]).forEach(r=>{const a=new Date(r.start_date+"T12:00:00"),b=new Date(r.end_date+"T12:00:00");for(let d=new Date(a);d<=b;d.setDate(d.getDate()+1))itDays.add(localDateKey(d));});
     let totalHours=0;
+    (shifts||[]).forEach(s=>totalHours+=Number(s.hours||0));
     const cells=Array.from({length:days},(_,i)=>{
-      const d=new Date(month.getFullYear(),month.getMonth(),i+1),key=localDateKey(d),s=byDay.get(key),isIT=itDays.has(key);
-      if(s)totalHours+=Number(s.hours||0);
-      const code=s?(s.shift_type.startsWith("Mañana")?"M":s.shift_type.startsWith("Tarde")?"T":"N"):isIT?"IT":"—";
-      return '<div class="calendar-day"><small>'+String(i+1).padStart(2,"0")+'</small><strong class="'+(s?"":"muted")+'">'+code+'</strong></div>';
+      const d=new Date(month.getFullYear(),month.getMonth(),i+1),key=localDateKey(d),dayShifts=byDay.get(key)||[],isIT=itDays.has(key);
+      const code=dayShifts.length?dayShifts.map(s=>s.shift_type.startsWith("Mañana")?"M":s.shift_type.startsWith("Tarde")?"T":"N").join("/") :isIT?"IT":"—";
+      return '<button type="button" class="calendar-day calendar-day-button" data-calendar-day="'+key+'" aria-label="Ver detalle del '+String(i+1)+'"><small>'+String(i+1).padStart(2,"0")+'</small><strong class="'+(dayShifts.length?"":"muted")+'">'+esc(code)+'</strong></button>';
     }).join("");
     const monthLabel=month.toLocaleDateString("es-ES",{month:"long",year:"numeric"});
-    setContent('<section class="panel"><div class="panel-head"><div><h3>Mi cuadrante</h3><p>'+esc(employee.post||"")+' · '+esc(employee.service||"")+'</p></div><div class="form-actions"><button class="secondary" id="guard-month-prev">‹</button><strong>'+esc(monthLabel.toUpperCase())+'</strong><button class="secondary" id="guard-month-next">›</button></div></div><div class="stats-grid">'+stat("HORAS ASIGNADAS",totalHours.toFixed(2)+" h","En el mes")+'</div><div class="guard-calendar">'+cells+'</div><div class="table-wrap"><table class="data-table"><thead><tr><th>Fecha</th><th>Turno</th><th>Puesto</th><th>Servicio</th><th>Horas</th></tr></thead><tbody>'+(shifts||[]).map(s=>'<tr><td>'+dateText(s.start_at)+'</td><td>'+esc(s.shift_type)+'</td><td>'+esc(s.position)+'</td><td>'+esc(s.service||employee.service||"—")+'</td><td>'+esc(s.hours??"—")+'</td></tr>').join("")+'</tbody></table></div></section>');
+    setContent('<section class="panel"><div class="panel-head"><div><h3>Mi cuadrante</h3><p>'+esc(employee.post||"")+' · '+esc(employee.service||"")+'</p></div><div class="form-actions"><button class="secondary" id="guard-month-prev">‹</button><strong>'+esc(monthLabel.toUpperCase())+'</strong><button class="secondary" id="guard-month-next">›</button></div></div><div class="stats-grid">'+stat("HORAS ASIGNADAS",totalHours.toFixed(2)+" h","En el mes")+'</div><div class="guard-calendar">'+cells+'</div><section class="notice" id="guard-day-detail"><strong>Detalle del día</strong><p>Pulsa cualquier día del calendario para consultar el puesto, horario, horas y servicio asignado.</p></section></section>');
+    function showDayDetail(key){
+      const dayShifts=byDay.get(key)||[],isIT=itDays.has(key),date=new Date(key+"T12:00:00").toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+      const detail=$("guard-day-detail");
+      detail.innerHTML='<h3>'+esc(date)+'</h3>'+(dayShifts.length?'<div class="table-wrap"><table class="data-table"><thead><tr><th>Puesto</th><th>Horario</th><th>Horas</th><th>Servicio / centro</th></tr></thead><tbody>'+dayShifts.map(s=>'<tr><td>'+esc(s.position||"—")+'</td><td>'+esc(s.shift_type||"—")+'</td><td>'+esc(s.hours??"—")+' h</td><td>'+esc(s.service||employee.service||"Sin servicio asignado")+'</td></tr>').join("")+'</tbody></table></div>':isIT?'<p>Este día figura como incapacidad temporal (IT).</p>':'<p>No tienes ningún turno asignado para este día.</p>');
+      document.querySelectorAll("[data-calendar-day]").forEach(b=>b.classList.toggle("selected",b.dataset.calendarDay===key));
+    }
     $("guard-month-prev").addEventListener("click",()=>{guardMonthOffset--;myShiftsPage().catch(e=>notify(e.message));});
     $("guard-month-next").addEventListener("click",()=>{guardMonthOffset++;myShiftsPage().catch(e=>notify(e.message));});
+    document.querySelectorAll("[data-calendar-day]").forEach(b=>b.addEventListener("click",()=>showDayDetail(b.dataset.calendarDay)));
+    const firstAssigned=(shifts||[])[0];
+    if(firstAssigned)showDayDetail(localDateKey(firstAssigned.start_at));
   }
   async function punchesPage(){
     const employee=await getOwnEmployee();
