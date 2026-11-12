@@ -24,3 +24,7 @@
 .calendar-day small{color:#91a0b6;font-size:10px}
 .calendar-day strong{font-size:17px;color:#8fb1ff}
 @media(max-width:650px){.guard-calendar{gap:4px}.calendar-day{min-height:55px;padding:6px}.calendar-day strong{font-size:14px}}
+
+.calendar-day-button{width:100%;color:inherit;font:inherit;text-align:left;cursor:pointer;appearance:none;-webkit-appearance:none;transition:border-color .15s,background .15s}
+.calendar-day-button:hover,.calendar-day-button:focus-visible{border-color:#6b98ff;background:#1a2b45;outline:none}
+.calendar-day-button.selected{border-color:#6b98ff;box-shadow:inset 0 0 0 1px #6b98ff}
