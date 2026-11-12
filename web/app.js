@@ -286,7 +286,7 @@
     }
     $("guard-month-prev").addEventListener("click",()=>{guardMonthOffset--;myShiftsPage().catch(e=>notify(e.message));});
     $("guard-month-next").addEventListener("click",()=>{guardMonthOffset++;myShiftsPage().catch(e=>notify(e.message));});
-    const calendar=$(".guard-calendar");
+    const calendar=document.querySelector(".guard-calendar");
     calendar.addEventListener("click",event=>{const dayButton=event.target.closest("button[data-calendar-day]");if(!dayButton)return;event.preventDefault();showDayDetail(dayButton.dataset.calendarDay);});
     const firstAssigned=(shifts||[])[0];
     if(firstAssigned)showDayDetail(localDateKey(firstAssigned.start_at));
